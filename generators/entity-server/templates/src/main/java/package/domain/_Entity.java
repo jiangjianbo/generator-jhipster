@@ -82,17 +82,45 @@ import static <%=packageName%>.config.Constants.ID_DELIMITER;
 import static org.springframework.data.couchbase.core.mapping.id.GenerationStrategy.UNIQUE;
 
 <%_ } _%>
+<%_ let abstractClass = '';
+    let extendsClass = '';
+    let implementsClass = '';
+    let classId = [];
+    let isCompositeId = false;
+    let classIdType = null;
+    let classIdNames = [];
+_%>
 <%_ if (typeof javadoc == 'undefined') { _%>
 /**
  * A <%= entityClass %>.
  */
-<%_ } else { _%>
-<%- formatAsClassJavadoc(javadoc) %>
-@ApiModel(description = "<%- formatAsApiDescription(javadoc) %>")
+<%_ } else {
+    abstractClass = extractInlineAnnotationValueFromJavadoc(javadoc, 'abstract', '', 'abstract ');
+    extendsClass = extractInlineAnnotationValueFromJavadoc(javadoc, 'extends', '', '');
+    if (extendsClass != '') extendsClass = 'extends ' + extendsClass + ' ';
+
+    implementsClass = extractInlineAnnotationValueFromJavadoc(javadoc, 'implements', '', '');
+    if (implementsClass != '') implementsClass = ',' + implementsClass;
+
+    let idstr = extractInlineAnnotationValueFromJavadoc(javadoc, 'id', '', '');
+    if (idstr != '') classId = idstr.split(/\s*,\s*/);
+    let idstr2 = extractInlineAnnotationValueFromJavadoc(javadoc, 'embedded-id', '', '');
+    if (idstr2 != '') {
+        isCompositeId = true;
+        classIdType = entityClass + 'Id';
+        classId = idstr2.split(/\s*,\s*/);
+    }
+_%>
+<%- formatAsClassJavadoc(removeInlineAnnotations(javadoc, 'entity ' + entityClass)) %>
+@ApiModel(description = "<%- formatAsApiDescription(removeInlineAnnotations(javadoc, entityClass)) %>")
+<%- extractInlineAnnotationsFromJavadoc(javadoc, '@') %>
 <%_ } _%>
 <%_ if (databaseType === 'sql') { _%>
 @Entity
 @Table(name = "<%= entityTableName %>")
+<%_     if (isCompositeId && classId.length > 0) { _%>
+@IdClass(<%= entityClass %>.<%= entityClass %>Id.class)
+<%_     } _%>
 <%_     if (enableHibernateCache) {
             if (cacheProvider === 'infinispan') { _%>
 @Cache(usage = CacheConcurrencyStrategy.READ_WRITE)
@@ -111,18 +139,60 @@ import static org.springframework.data.couchbase.core.mapping.id.GenerationStrat
 <%_ } if (searchEngine === 'elasticsearch' && databaseType !== 'mongodb') { _%>
 @Document(indexName = "<%= entityInstance.toLowerCase() %>")
 <%_ } _%>
-public class <%= entityClass %> implements Serializable {
+public <%= abstractClass %>class <%= entityClass %> <%= extendsClass %>implements Serializable<%= implementsClass %> {
 
     private static final long serialVersionUID = 1L;
 <% if (databaseType === 'sql') { %>
+    <%_ if (classId.length == 0) { _%>
     @Id
-    <%_ if (prodDatabaseType === 'mysql' || prodDatabaseType === 'mariadb') { _%>
+    <%_     if (prodDatabaseType === 'mysql' || prodDatabaseType === 'mariadb') { _%>
     @GeneratedValue(strategy = GenerationType.IDENTITY)
-    <%_ }  else { _%>
+    <%_     }  else { _%>
     @GeneratedValue(strategy = GenerationType.SEQUENCE, generator = "sequenceGenerator")
     @SequenceGenerator(name = "sequenceGenerator")
-    <%_ } _%>
+    <%_     } _%>
     private Long id;
+    <%_ } else if (isCompositeId) { _%>
+    @Embeddable
+    public static class <%= entityClass %>Id {
+        <%_
+        for (idx in fields) {
+            const fieldName = fields[idx].fieldName;
+            if (classId.indexOf(fieldName) == -1) continue;
+            let inlineDefaultValue = '';
+
+            if (typeof fields[idx].javadoc !== 'undefined') {
+                inlineDefaultValue = extractInlineAnnotationValueFromJavadoc(fields[idx].javadoc, 'default');
+                if (inlineDefaultValue != null) inlineDefaultValue = ' = ' + inlineDefaultValue;
+            }
+            let required = false;
+            const fieldValidate = fields[idx].fieldValidate;
+            const fieldValidateRules = fields[idx].fieldValidateRules;
+            const fieldValidateRulesMaxlength = fields[idx].fieldValidateRulesMaxlength;
+            const fieldType = fields[idx].fieldType;
+            const fieldTypeBlobContent = fields[idx].fieldTypeBlobContent;
+
+            const fieldNameUnderscored = fields[idx].fieldNameUnderscored;
+            const fieldNameAsDatabaseColumn = fields[idx].fieldNameAsDatabaseColumn;
+
+            if (fields[idx].fieldIsEnum) { _%>
+        @Enumerated(EnumType.STRING)
+        <%_ }
+            if (['Instant', 'ZonedDateTime', 'LocalDate'].includes(fieldType)) { _%>
+        @Column(name = "<%-fieldNameAsDatabaseColumn %>"<% if (required) { %>, nullable = false<% } %>)
+        <%_ } else if (fieldType === 'BigDecimal') { _%>
+        @Column(name = "<%-fieldNameAsDatabaseColumn %>", precision=10, scale=2<% if (required) { %>, nullable = false<% } %>)
+        <%_ } else { _%>
+        @Column(name = "<%-fieldNameAsDatabaseColumn %>"<% if (fieldValidate === true) { %><% if (fieldValidateRules.includes('maxlength')) { %>, length = <%= fieldValidateRulesMaxlength %><% } %><% if (required) { %>, nullable = false<% } %><% } %>)
+        <%_ } _%>
+        public String <%= fieldName %><%= inlineDefaultValue %>;
+        <%_
+        }
+        _%>
+    }
+    @EmbeddedId
+    private <%= entityClass %>Id id;
+    <%_ } _%>
 <% } if (databaseType === 'couchbase') { %>
     public static final String PREFIX = "<%= entityInstance.toLowerCase() %>";
 
@@ -139,8 +209,15 @@ public class <%= entityClass %> implements Serializable {
 <%_ } _%>
 
 <%_ for (idx in fields) {
-    if (typeof fields[idx].javadoc !== 'undefined') { _%>
-<%- formatAsFieldJavadoc(fields[idx].javadoc) %>
+        const fieldName = fields[idx].fieldName;
+        if (isCompositeId && classId.indexOf(fieldName) != -1) continue;
+    let inlineDefaultValue = '';
+
+    if (typeof fields[idx].javadoc !== 'undefined') {
+        inlineDefaultValue = extractInlineAnnotationValueFromJavadoc(fields[idx].javadoc, 'default');
+        if (inlineDefaultValue != null) inlineDefaultValue = ' = ' + inlineDefaultValue;
+_%>
+<%- removeInlineAnnotations(formatAsFieldJavadoc(fields[idx].javadoc)) %>
     <%_ }
     let required = false;
     const fieldValidate = fields[idx].fieldValidate;
@@ -148,7 +225,7 @@ public class <%= entityClass %> implements Serializable {
     const fieldValidateRulesMaxlength = fields[idx].fieldValidateRulesMaxlength;
     const fieldType = fields[idx].fieldType;
     const fieldTypeBlobContent = fields[idx].fieldTypeBlobContent;
-    const fieldName = fields[idx].fieldName;
+
     const fieldNameUnderscored = fields[idx].fieldNameUnderscored;
     const fieldNameAsDatabaseColumn = fields[idx].fieldNameAsDatabaseColumn;
     if (fieldValidate === true) {
@@ -158,9 +235,15 @@ public class <%= entityClass %> implements Serializable {
     <%- include ../common/field_validators -%>
     <%_ } _%>
     <%_ if (typeof fields[idx].javadoc != 'undefined') { _%>
-    @ApiModelProperty(value = "<%- formatAsApiDescription(fields[idx].javadoc) %>"<% if (required) { %>, required = true<% } %>)
+    @ApiModelProperty(value = "<%- formatAsApiDescription(removeInlineAnnotations(fields[idx].javadoc)) %>"<% if (required) { %>, required = true<% } %>)
+    <%- extractInlineAnnotationsFromJavadoc(fields[idx].javadoc, '@') %>
     <%_ } _%>
     <%_ if (databaseType === 'sql') {
+        if (classId.indexOf(fieldName) != -1) {
+            classIdNames.push(fields[idx].fieldInJavaBeanMethod);
+    _%>
+    @Id // <%= classIdNames %>
+    <%_ }
         if (fields[idx].fieldIsEnum) { _%>
     @Enumerated(EnumType.STRING)
         <%_ }
@@ -179,9 +262,9 @@ public class <%= entityClass %> implements Serializable {
     @Field("<%=fieldNameUnderscored %>")
     <%_ } _%>
     <%_ if (fieldTypeBlobContent !== 'text') { _%>
-    private <%= fieldType %> <%= fieldName %>;
+    private <%= fieldType %> <%= fieldName %><%= inlineDefaultValue %>;
     <%_ } else { _%>
-    private String <%= fieldName %>;
+    private String <%= fieldName %><%= inlineDefaultValue %>;
     <%_ } _%>
 
     <%_ if ((fieldType === 'byte[]' || fieldType === 'ByteBuffer') && fieldTypeBlobContent !== 'text') { _%>
@@ -273,13 +356,15 @@ public class <%= entityClass %> implements Serializable {
     <%_ }
     } _%>
     // jhipster-needle-entity-add-field - JHipster will add fields here, do not remove
-    public <% if (databaseType === 'sql') { %>Long<% } %><% if (databaseType === 'mongodb' || databaseType === 'couchbase') { %>String<% } %><% if (databaseType === 'cassandra') { %>UUID<% } %> getId() {
+    <%_ if (isCompositeId || classId.length == 0) { _%>
+    public <% if (databaseType === 'sql') { %><%= classIdType ? classIdType : 'Long' %><% } %><% if (databaseType === 'mongodb' || databaseType === 'couchbase') { %>String<% } %><% if (databaseType === 'cassandra') { %>UUID<% } %> getId() {
         return id;
     }
 
-    public void setId(<% if (databaseType === 'sql') { %>Long<% } %><% if (databaseType === 'mongodb' || databaseType === 'couchbase') { %>String<% } %><% if (databaseType === 'cassandra') { %>UUID<% } %> id) {
+    public void setId(<% if (databaseType === 'sql') { %><%= classIdType ? classIdType : 'Long' %><% } %><% if (databaseType === 'mongodb' || databaseType === 'couchbase') { %>String<% } %><% if (databaseType === 'cassandra') { %>UUID<% } %> id) {
         this.id = id;
     }
+    <%_ } _%>
 <%_ for (idx in fields) {
         const fieldType = fields[idx].fieldType;
         const fieldTypeBlobContent = fields[idx].fieldTypeBlobContent;
@@ -410,26 +495,49 @@ public class <%= entityClass %> implements Serializable {
             return false;
         }
         <%= entityClass %> <%= entityInstance %> = (<%= entityClass %>) o;
+        <%_ if (classIdNames.length == 0) { _%>
         if (<%= entityInstance %>.getId() == null || getId() == null) {
             return false;
         }
         return Objects.equals(getId(), <%= entityInstance %>.getId());
+        <%_ } else {
+            for(idx in classIdNames){ _%>
+        if (! Objects.equals(<%= entityInstance %>.get<%= classIdNames[idx] %>(), get<%= classIdNames[idx] %>())) {
+            return false;
+        }
+
+        return true;
+        <%_ }
+        } _%>
     }
 
     @Override
     public int hashCode() {
+        <%_ if (classIdNames.length == 0) { _%>
         return Objects.hashCode(getId());
+        <%_ } else {
+            let chain = [];
+            for(idx in classIdNames){
+                chain.push('get'+ classIdNames[idx] + '()');
+            } _%>
+        return Objects.hash(<%= chain.join(',') %>);
+        <%_
+        } _%>
     }
 
     @Override
     public String toString() {
         return "<%= entityClass %>{" +
+            <%_ if (classIdNames.length == 0) { _%>
             "id=" + getId() +
+            <%_ } _%>
             <%_ for (idx in fields) {
                 const fieldType = fields[idx].fieldType;
                 const fieldTypeBlobContent = fields[idx].fieldTypeBlobContent;
                 const fieldName = fields[idx].fieldName;
                 const fieldInJavaBeanMethod = fields[idx].fieldInJavaBeanMethod;
+
+                if (isCompositeId && classId.indexOf(fieldName) != -1) continue;
                 const isNumeric = ['integer', 'long', 'float', 'double', 'bigdecimal'].includes(fieldType.toLowerCase()); _%>
             ", <%= fieldName %>=<% if (! isNumeric) {%>'<% } %>" + <% if (fieldType.toLowerCase() === 'boolean') { %>is<% } else { %>get<% } %><%= fieldInJavaBeanMethod %>() <% if (! isNumeric) { %>+ "'" <% } %>+
                 <%_ if ((fieldType === 'byte[]' || fieldType === 'ByteBuffer') && fieldTypeBlobContent !== 'text') { _%>

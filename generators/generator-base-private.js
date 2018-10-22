@@ -313,6 +313,105 @@ module.exports = class extends Generator {
     }
 
     /**
+     * 从 javadoc 中提取 pg- 开头的行内容
+     *
+     * @param {*} text javadoc字符串
+     * @param {*} pattern 可选，Map[string,Func] 对象，key是 pg-后的名字;或string是 pg-后的名字;或\@ 字符;或正则表达式。匹配时已经去除 pg- 前缀。
+     * @returns 字符串，元素只包含 annotation 的 pg- 之后的文字，含换行
+     */
+    extractInlineAnnotationsFromJavadoc(text, pattern) {
+        return this.extractInlineAnnotationLinesFromJavadoc(text, pattern).join('\n');
+    }
+
+    /**
+     * 从 javadoc 中提取 pg- 开头的行内容
+     *
+     * @param {*} text javadoc字符串
+     * @param {*} pattern 可选，Map[string,Func] 对象，key是 pg-后的名字;或string是 pg-后的名字;或\@ 字符;或正则表达式。匹配时已经去除 pg- 前缀。
+     * @returns 数组，元素只包含 annotation 的 pg- 之后的文字
+     */
+    extractInlineAnnotationLinesFromJavadoc(text, pattern) {
+        const frags = [];
+        const nameMatch = typeof pattern === 'string' ? pattern: null;
+        const isAnno = pattern === '@';
+        const isRegex = typeof pattern === 'object' && typeof pattern.compile === 'function';
+
+        text.replace(
+            /^\s*((\/\*)?\*+)?(\s*pg\-(.+)\s*)(\*\/)?$/gm,
+            (str, m1, m2, m3, m4, m5) => {
+                if (isAnno && m4.charAt(0) == '@') {
+                    frags.push(m4);
+                } else if (pattern != null) {
+                    const match = m4.split(/\s*:\s*/);
+                    if (match == null || match.length === 0) return '';
+
+                    if (nameMatch != null) {
+                        if (match[0] == nameMatch) frags.push(m4);
+                    } else if (isRegex) {
+                        if (pattern.test(match[0])) frags.push(m4);
+                    } else {
+                        const fn = pattern[match[0]];
+                        if (typeof fn === 'function') frags.push(fn(m4));
+                    }
+                }
+                return '';
+            }
+        );
+
+        return frags;
+    }
+
+    /**
+     * 从 javadoc 中获取 pg- 开头内容的值
+     *
+     * @param {*} javadoc
+     * @param {*} pattern
+     * @param {*} missingValue 没有匹配时候的返回值
+     * @param {*} emptyValue 匹配但是取值为空的时候的返回值
+     * @returns pattern匹配的值字符串，如果有多个匹配，则返回第一个。如果有匹配且没有value，则返回''字符串
+     */
+    extractInlineAnnotationValueFromJavadoc(javadoc, pattern, missingValue, emptyValue) {
+        if (pattern == '@') return missingValue;
+
+        const lines = this.extractInlineAnnotationLinesFromJavadoc(javadoc, pattern);
+        if (lines.length > 0) {
+            const pos = lines[0].indexOf(':');
+            if (pos >= 1) {
+                return lines[0].substring(pos + 1).trim();
+            }
+
+            return typeof emptyValue === 'undefined' ? '' : emptyValue;
+        }
+
+        return missingValue;
+    }
+
+    /**
+     * 移除 javadoc 中的内置 pg- 开头的内容
+     *
+     * @param {*} text
+     * @param {*} defaultText
+     * @returns
+     */
+    removeInlineAnnotations(text, defaultText) {
+        if (defaultText == null) defaultText = '';
+
+        const str = text.replace(
+            /^\s*((\/\*)?\*+)?(\s*pg\-.+\s*)(\*\/)?$/gm,
+            (str, m1, m2, m3, m4) => {
+                if (m1 == '/**') {
+                    return m4 == '*/' ? '' : m1;
+                } else {
+                    return m4 == '*/' ? m4 : '';
+                }
+            }
+        ).trim();
+
+        return str.length == 0 ? defaultText : str;
+    }
+
+
+    /**
      * Format As Class Javadoc
      *
      * @param {string} text - text to format

@@ -22,6 +22,11 @@
     if (fieldsContainInstant || fieldsContainZonedDateTime || fieldsContainLocalDate) {
         hasDate = true;
     }
+
+    let request_mapping = 'api';
+    if (typeof javadoc != 'undefined') {
+        request_mapping = extractInlineAnnotationValueFromJavadoc(javadoc, 'request-mapping', 'api', 'api');
+    }
 _%>
     angular
         .module('<%=angularAppName%>')
@@ -30,7 +35,7 @@ _%>
     <%= entityClass %>.$inject = ['$resource'<% if (hasDate) { %>, 'DateUtils'<% } %>];
 
     function <%= entityClass %> ($resource<% if (hasDate) { %>, DateUtils<% } %>) {
-        var resourceUrl = <% if (applicationType === 'gateway' && locals.microserviceName) {%> '<%= microserviceName.toLowerCase() %>/' +<% } %> 'api/<%= entityApiUrl %>/:id';
+        var resourceUrl = <% if (applicationType === 'gateway' && locals.microserviceName) {%> '<%= microserviceName.toLowerCase() %>/' +<% } %> '<%= request_mapping %>/<%= entityApiUrl %>/:id';
 
         return $resource(resourceUrl, {}, {
             'query': { method: 'GET', isArray: true},

@@ -31,19 +31,29 @@ import java.util.Set;<% } %>
 import java.util.Objects;<% if (databaseType === 'cassandra') { %>
 import java.util.UUID;<% } %><% if (fieldsContainBlob && databaseType === 'sql') { %>
 import javax.persistence.Lob;<% } %>
+<%_ if (typeof javadoc != 'undefined') { _%>
+import io.swagger.annotations.ApiModel;
+import io.swagger.annotations.ApiModelProperty;
+<%_ } _%>
 <%_ for (idx in fields) { if (fields[idx].fieldIsEnum === true) { _%>
 import <%=packageName%>.domain.enumeration.<%= fields[idx].fieldType %>;
 <%_ } } _%>
 
+<%_ if (typeof javadoc == 'undefined') { _%>
 /**
  * A DTO for the <%= entityClass %> entity.
  */
+<%_ } else { _%>
+<%- formatAsClassJavadoc(removeInlineAnnotations(javadoc, 'entity ' + entityClass)) %>
+@ApiModel(description = "<%- formatAsApiDescription(removeInlineAnnotations(javadoc, entityClass)) %>")
+<%_ } _%>
 public class <%= entityClass %>DTO implements Serializable {
 <% if (databaseType === 'sql') { %>
     private Long id;<% } %><% if (databaseType === 'mongodb' || databaseType === 'couchbase') { %>
     private String id;<% } %><% if (databaseType === 'cassandra') { %>
     private UUID id;<% } %>
     <%_ for (idx in fields) {
+        let required = false;
         const fieldValidate = fields[idx].fieldValidate;
         const fieldValidateRules = fields[idx].fieldValidateRules;
         const fieldValidateRulesMinlength = fields[idx].fieldValidateRulesMinlength;
@@ -58,13 +68,23 @@ public class <%= entityClass %>DTO implements Serializable {
         const fieldName = fields[idx].fieldName;_%>
 
     <%_ if (fieldValidate === true) {
-            let required = false;
             if (fieldValidate === true && fieldValidateRules.includes('required')) {
                 required = true;
             } _%>
     <%- include ../../common/field_validators -%>
     <%_ } _%>
-    <%_ if (fieldType === 'byte[]' && databaseType === 'sql') { _%>
+    <%_
+    let inlineDefaultValue = '';
+
+    if (typeof fields[idx].javadoc !== 'undefined') {
+        inlineDefaultValue = extractInlineAnnotationValueFromJavadoc(fields[idx].javadoc, 'default');
+        if (inlineDefaultValue != null) inlineDefaultValue = ' = ' + inlineDefaultValue;
+    } _%>
+    <%- removeInlineAnnotations(formatAsFieldJavadoc(fields[idx].javadoc)) %>
+    <%_ if (typeof fields[idx].javadoc != 'undefined') { _%>
+    @ApiModelProperty(value = "<%- formatAsApiDescription(removeInlineAnnotations(fields[idx].javadoc)) %>"<% if (required) { %>, required = true<% } %>)
+        <%_ } _%>
+<%_ if (fieldType === 'byte[]' && databaseType === 'sql') { _%>
     @Lob
     <%_ } _%>
     <%_ if (fieldTypeBlobContent !== 'text') { _%>

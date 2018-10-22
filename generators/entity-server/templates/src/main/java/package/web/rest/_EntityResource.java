@@ -18,6 +18,8 @@
 -%>
 package <%=packageName%>.web.rest;
 
+import io.swagger.annotations.Api;
+import io.swagger.annotations.ApiOperation;
 import com.codahale.metrics.annotation.Timed;
 <%_ if (dto !== 'mapstruct' || service === 'no') { _%>
 import <%=packageName%>.domain.<%= entityClass %>;
@@ -41,6 +43,7 @@ import <%=packageName%>.service.<%= entityClass %>QueryService;
 import io.github.jhipster.web.util.ResponseUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import springfox.documentation.annotations.ApiIgnore;
 <%_ if (pagination !== 'no') { _%>
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -67,8 +70,20 @@ import static org.elasticsearch.index.query.QueryBuilders.*;<% } %>
 /**
  * REST controller for managing <%= entityClass %>.
  */
+@Api(description = "<%- formatAsApiDescription(removeInlineAnnotations(javadoc, entityClass)) %>")
 @RestController
-@RequestMapping("/api")
+<%_ let mapping = '/api';
+    let ignoreApi = null;
+    if (typeof javadoc != 'undefined') {
+        mapping = extractInlineAnnotationValueFromJavadoc(javadoc, 'request-mapping', '/api', '/api');
+
+        ignoreApi = extractInlineAnnotationValueFromJavadoc(javadoc, 'api-ignore', '', '').split(/\s*,\s*/);
+    }
+_%>
+@RequestMapping("<%= mapping %>")
+<%_ if (ignoreApi != null && ignoreApi.length == 0) { _%>
+@ApiIgnore
+<%_ } _%>
 public class <%= entityClass %>Resource {
 
     private final Logger log = LoggerFactory.getLogger(<%= entityClass %>Resource.class);
@@ -86,6 +101,9 @@ public class <%= entityClass %>Resource {
      * @return the ResponseEntity with status 201 (Created) and with body the new <%= instanceName %>, or with status 400 (Bad Request) if the <%= entityInstance %> has already an ID
      * @throws URISyntaxException if the Location URI syntax is incorrect
      */
+    <%_ if (ignoreApi != null && ignoreApi.indexOf('create') != -1) { _%>
+    @ApiIgnore
+    <%_ } _%>
     @PostMapping("/<%= entityApiUrl %>")
     @Timed
     public ResponseEntity<<%= instanceType %>> create<%= entityClass %>(<% if (validation) { %>@Valid <% } %>@RequestBody <%= instanceType %> <%= instanceName %>) throws URISyntaxException {
@@ -107,6 +125,9 @@ public class <%= entityClass %>Resource {
      * or with status 500 (Internal Server Error) if the <%= instanceName %> couldn't be updated
      * @throws URISyntaxException if the Location URI syntax is incorrect
      */
+    <%_ if (ignoreApi != null && ignoreApi.indexOf('update') != -1) { _%>
+    @ApiIgnore
+    <%_ } _%>
     @PutMapping("/<%= entityApiUrl %>")
     @Timed
     public ResponseEntity<<%= instanceType %>> update<%= entityClass %>(<% if (validation) { %>@Valid <% } %>@RequestBody <%= instanceType %> <%= instanceName %>) throws URISyntaxException {
@@ -127,6 +148,9 @@ public class <%= entityClass %>Resource {
      * @param filter the filter of the request<% } %>
      * @return the ResponseEntity with status 200 (OK) and the list of <%= entityInstancePlural %> in body
      */
+    <%_ if (ignoreApi != null && ignoreApi.indexOf('getall') != -1) { _%>
+    @ApiIgnore
+    <%_ } _%>
     @GetMapping("/<%= entityApiUrl %>")
     @Timed<%- include('../../common/get_all_template', {viaService: viaService}); -%>
 
@@ -136,6 +160,9 @@ public class <%= entityClass %>Resource {
      * @param id the id of the <%= instanceName %> to retrieve
      * @return the ResponseEntity with status 200 (OK) and with body the <%= instanceName %>, or with status 404 (Not Found)
      */
+    <%_ if (ignoreApi != null && ignoreApi.indexOf('get') != -1) { _%>
+    @ApiIgnore
+    <%_ } _%>
     @GetMapping("/<%= entityApiUrl %>/{id}")
     @Timed
     public ResponseEntity<<%= instanceType %>> get<%= entityClass %>(@PathVariable <%= pkType %> id) {
@@ -149,6 +176,9 @@ public class <%= entityClass %>Resource {
      * @param id the id of the <%= instanceName %> to delete
      * @return the ResponseEntity with status 200 (OK)
      */
+    <%_ if (ignoreApi != null && ignoreApi.indexOf('delete') != -1) { _%>
+    @ApiIgnore
+    <%_ } _%>
     @DeleteMapping("/<%= entityApiUrl %>/{id}")
     @Timed
     public ResponseEntity<Void> delete<%= entityClass %>(@PathVariable <%= pkType %> id) {
@@ -164,6 +194,9 @@ public class <%= entityClass %>Resource {
      * @param pageable the pagination information<% } %>
      * @return the result of the search
      */
+    <%_ if (ignoreApi != null && ignoreApi.indexOf('search') != -1) { _%>
+    @ApiIgnore
+    <%_ } _%>
     @GetMapping("/_search/<%= entityApiUrl %>")
     @Timed<%- include('../../common/search_template', {viaService: viaService}); -%><% } %>
 }
