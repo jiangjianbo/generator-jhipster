@@ -74,10 +74,36 @@ import static org.elasticsearch.index.query.QueryBuilders.*;<% } %>
 @RestController
 <%_ let mapping = '/api';
     let ignoreApi = null;
+    let batch = [];
+
+    let lastModified = null;
+    let lastModifiedReturn = null;
+    let lastModifiedArgs = [];
+
     if (typeof javadoc != 'undefined') {
         mapping = extractInlineAnnotationValueFromJavadoc(javadoc, 'request-mapping', '/api', '/api');
-
         ignoreApi = extractInlineAnnotationValueFromJavadoc(javadoc, 'api-ignore', '', '').split(/\s*,\s*/);
+        batch = extractInlineAnnotationValueFromJavadoc(javadoc, 'api-batch', '', '').split(/\s*,\s*/);
+
+        lastModified = extractInlineAnnotationValueFromJavadoc(javadoc, 'last-modified', null, '');
+        if (lastModified != null){
+            for (idx in fields) {
+                let required = false;
+
+                // 只取第一个 timestamp
+                if (lastModifiedReturn == null && extractInlineAnnotationValueFromJavadoc(fields[idx].javadoc, 'timestamp') != null) {
+                    lastModifiedReturn = fields[idx];
+                }
+                if (extractInlineAnnotationValueFromJavadoc(fields[idx].javadoc, 'timestamp-key') != null) {
+                    lastModifiedArgs.push(fields[idx]);
+                }
+            }
+            if (lastModifiedReturn == null) {
+                debug("field with pg-timestamp not found! ignore pg-last-modified flag.");
+                lastModified = null;
+            }
+        }
+
     }
 _%>
 @RequestMapping("<%= mapping %>")
@@ -108,13 +134,42 @@ public class <%= entityClass %>Resource {
     @Timed
     public ResponseEntity<<%= instanceType %>> create<%= entityClass %>(<% if (validation) { %>@Valid <% } %>@RequestBody <%= instanceType %> <%= instanceName %>) throws URISyntaxException {
         log.debug("REST request to save <%= entityClass %> : {}", <%= instanceName %>);
-        if (<%= instanceName %>.getId() != null) {
-            throw new BadRequestAlertException("A new <%= entityInstance %> cannot already have an ID", ENTITY_NAME, "idexists");
-        }<%- include('../../common/save_template', {viaService: viaService, returnDirectly: false}); -%>
-        return ResponseEntity.created(new URI("/api/<%= entityApiUrl %>/" + result.getId()))
+        <%= instanceType %> result = _create<%= entityClass %>(<%= instanceName %>);
+        return ResponseEntity.created(new URI("<%= mapping %>/<%= entityApiUrl %>/" + result.getId()))
             .headers(HeaderUtil.createEntityCreationAlert(ENTITY_NAME, result.getId().toString()))
             .body(result);
     }
+
+    <%= instanceType %> _create<%= entityClass %>(<%= instanceType %> <%= instanceName %>) throws URISyntaxException {
+        if (<%= instanceName %>.getId() != null) {
+            throw new BadRequestAlertException("A new <%= entityInstance %> cannot already have an ID", ENTITY_NAME, "idexists");
+        }<%- include('../../common/save_template', {viaService: viaService, returnDirectly: false}); -%>
+        return result;
+    }
+
+    <%_ if (batch.indexOf('create') != -1) { _%>
+    /**
+     * POST  /<%= entityApiUrl %>-batch : 批量插入 <%= entityInstance %>.
+     *
+     * @param List<<%= instanceName %>> the <%= instanceName %> list to create
+     * @return the ResponseEntity with status 201 (Created) and with body the new ID, or with status 400 (Bad Request) if the <%= entityInstance %> has already an ID
+     * @throws URISyntaxException if the Location URI syntax is incorrect
+     */
+    <%_ if (ignoreApi != null && ignoreApi.indexOf('batch-create') != -1) { _%>
+    @ApiIgnore
+    <%_ } _%>
+    @PostMapping("/batch/<%= entityApiUrl %>")
+    @Timed
+    public ResponseEntity<List<<%= pkType %>>> create<%= entityClass %>Batch(<% if (validation) { %>@Valid <% } %>@RequestBody List<<%= instanceType %>> <%= instanceName %>List) throws URISyntaxException {
+        log.debug("REST request to batch save <%= entityClass %> : {}", <%= instanceName %>List);
+        List<<%= pkType %>> results = new java.util.ArrayList<>(<%= instanceName %>List.size());
+        for(<%= instanceType %> <%= instanceName %> : <%= instanceName %>List) {
+            <%= instanceType %> result = _create<%= entityClass %>(<%= instanceName %>);
+            results.add(result.getId());
+        }
+        return ResponseEntity.ok().body(results);
+    }
+    <%_ } _%>
 
     /**
      * PUT  /<%= entityApiUrl %> : Updates an existing <%= entityInstance %>.
@@ -132,13 +187,44 @@ public class <%= entityClass %>Resource {
     @Timed
     public ResponseEntity<<%= instanceType %>> update<%= entityClass %>(<% if (validation) { %>@Valid <% } %>@RequestBody <%= instanceType %> <%= instanceName %>) throws URISyntaxException {
         log.debug("REST request to update <%= entityClass %> : {}", <%= instanceName %>);
-        if (<%= instanceName %>.getId() == null) {
-            return create<%= entityClass %>(<%= instanceName %>);
-        }<%- include('../../common/save_template', {viaService: viaService, returnDirectly: false}); -%>
+        <%= instanceType %> result = _update<%= entityClass %>(<%= instanceName %>);
         return ResponseEntity.ok()
             .headers(HeaderUtil.createEntityUpdateAlert(ENTITY_NAME, <%= instanceName %>.getId().toString()))
             .body(result);
     }
+
+    <%= instanceType %> _update<%= entityClass %>(<%= instanceType %> <%= instanceName %>) throws URISyntaxException {
+        if (<%= instanceName %>.getId() == null) {
+            return _create<%= entityClass %>(<%= instanceName %>);
+        }<%- include('../../common/save_template', {viaService: viaService, returnDirectly: false}); -%>
+        return result;
+    }
+
+    <%_ if (batch.indexOf('update') != -1) { _%>
+    /**
+     * PUT  /<%= entityApiUrl %>-batch : Batch updates an existing <%= entityInstance %>.
+     *
+     * @param List<<%= instanceName %>> the <%= instanceName %>List to update
+     * @return the ResponseEntity with status 200 (OK) and with body the updated <%= instanceName %>,
+     * or with status 400 (Bad Request) if the <%= instanceName %> is not valid,
+     * or with status 500 (Internal Server Error) if the <%= instanceName %> couldn't be updated
+     * @throws URISyntaxException if the Location URI syntax is incorrect
+     */
+    <%_ if (ignoreApi != null && ignoreApi.indexOf('batch-update') != -1) { _%>
+    @ApiIgnore
+    <%_ } _%>
+    @PutMapping("/batch/<%= entityApiUrl %>")
+    @Timed
+    public ResponseEntity<List<<%= pkType %>>> update<%= entityClass %>Batch(<% if (validation) { %>@Valid <% } %>@RequestBody List<<%= instanceType %>> <%= instanceName %>List) throws URISyntaxException {
+        log.debug("REST request to update <%= entityClass %> : {}", <%= instanceName %>List);
+        List<<%= pkType %>> results = new java.util.ArrayList<>(<%= instanceName %>List.size());
+        for(<%= instanceType %> <%= instanceName %> : <%= instanceName %>List) {
+            <%= instanceType %> result = _update<%= entityClass %>(<%= instanceName %>);
+            results.add(result.getId());
+        }
+        return ResponseEntity.ok().body(results);
+    }
+    <%_ } _%>
 
     /**
      * GET  /<%= entityApiUrl %> : get all the <%= entityInstancePlural %>.
@@ -184,8 +270,40 @@ public class <%= entityClass %>Resource {
     public ResponseEntity<Void> delete<%= entityClass %>(@PathVariable <%= pkType %> id) {
         log.debug("REST request to delete <%= entityClass %> : {}", id);<%- include('../../common/delete_template', {viaService: viaService}); -%>
         return ResponseEntity.ok().headers(HeaderUtil.createEntityDeletionAlert(ENTITY_NAME, id<% if (pkType !== 'String') { %>.toString()<% } %>)).build();
-    }<% if (searchEngine === 'elasticsearch') { %>
+    }
 
+    <%_ if (lastModified != null) {
+        let comma = '';
+        let args = '';
+        let callArgs = '';
+        let brackets = '';
+        let method = 'findTop' + lastModifiedReturn.fieldInJavaBeanMethod + 'By';
+        for (idx in lastModifiedArgs) {
+            args = args + comma + lastModifiedArgs[idx].fieldType + ' ' + lastModifiedArgs[idx].fieldName;
+            callArgs = callArgs + comma + lastModifiedArgs[idx].fieldName;
+            method = method + lastModifiedArgs[idx].fieldInJavaBeanMethod;
+            brackets = brackets + comma + '{}';
+            comma = ', '
+        }
+        method = method + 'OrderBy' + lastModifiedReturn.fieldInJavaBeanMethod + 'Desc';
+        let repoOrService = entityInstance + (viaService? 'Service': 'Repository');
+    _%>
+    /**
+     * 获取对象的最后修改时间
+     */
+    <%_ if (ignoreApi != null && ignoreApi.indexOf('last-modified') != -1) { _%>
+    @ApiIgnore
+    <%_ } _%>
+    @GetMapping("/last-modified/<%= entityApiUrl %>")
+    @Timed
+    public ResponseEntity<<%= lastModifiedReturn.fieldType %>> getLastModified<%= entityClass %>(<%= args %>) {
+        log.debug("REST request to get last-modified <%= entityClass %> : <%= brackets %>"<%= brackets.length == 0? '': ',' %> <%= callArgs %>);
+        <%= lastModifiedReturn.fieldType %> ret = <%= repoOrService %>.<%= method %>(<%= callArgs %>);
+        return ResponseUtil.wrapOrNotFound(Optional.ofNullable(ret));
+    }
+    <%_ } _%>
+
+    <% if (searchEngine === 'elasticsearch') { %>
     /**
      * SEARCH  /_search/<%= entityApiUrl %>?query=:query : search for the <%= entityInstance %> corresponding
      * to the query.

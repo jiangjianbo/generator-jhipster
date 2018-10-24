@@ -85,6 +85,50 @@ public interface <%=entityClass%>Repository extends <% if (databaseType === 'sql
     <%=entityClass%> findOneWithEagerRelationships(@Param("id") Long id);
     <%_ } _%>
 
+
+    <%_
+    let lastModified = null;
+    let lastModifiedReturn = null;
+    let lastModifiedArgs = [];
+
+    if (typeof javadoc != 'undefined') {
+        lastModified = extractInlineAnnotationValueFromJavadoc(javadoc, 'last-modified', null, '');
+        if (lastModified != null){
+            for (idx in fields) {
+                let required = false;
+
+                // ????? timestamp
+                if (lastModifiedReturn == null && extractInlineAnnotationValueFromJavadoc(fields[idx].javadoc, 'timestamp') != null) {
+                    lastModifiedReturn = fields[idx];
+                }
+                if (extractInlineAnnotationValueFromJavadoc(fields[idx].javadoc, 'timestamp-key') != null) {
+                    lastModifiedArgs.push(fields[idx]);
+                }
+            }
+            if (lastModifiedReturn == null) {
+                debug("field with pg-timestamp not found! ignore pg-last-modified flag.");
+                lastModified = null;
+            }
+        }
+    }
+
+    if (lastModified != null) {
+        let comma = '';
+        let args = '';
+        let callArgs = '';
+        let method = 'findTop' + lastModifiedReturn.fieldInJavaBeanMethod + 'By';
+        for (idx in lastModifiedArgs) {
+            args = args + comma + lastModifiedArgs[idx].fieldType + ' ' + lastModifiedArgs[idx].fieldName;
+            callArgs = callArgs + comma + lastModifiedArgs[idx].fieldName;
+            method = method + lastModifiedArgs[idx].fieldInJavaBeanMethod;
+            comma = ', '
+        }
+        method = method + 'OrderBy' + lastModifiedReturn.fieldInJavaBeanMethod + 'Desc';
+    _%>
+    <%= lastModifiedReturn.fieldType %> <%= method %>(<%= args %>);
+    <%_ } _%>
+
+
 }
 <%_ } if (databaseType === 'cassandra') { _%>
 @Repository

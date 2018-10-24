@@ -74,8 +74,51 @@ public interface <%= entityClass %>Service {
      *
      * @param id the id of the entity
      */
-    void delete(<%= pkType %> id);<% if (searchEngine === 'elasticsearch') { %>
+    void delete(<%= pkType %> id);
 
+    <%_
+    let lastModified = null;
+    let lastModifiedReturn = null;
+    let lastModifiedArgs = [];
+
+    if (typeof javadoc != 'undefined') {
+        lastModified = extractInlineAnnotationValueFromJavadoc(javadoc, 'last-modified', null, '');
+        if (lastModified != null){
+            for (idx in fields) {
+                let required = false;
+
+                // 只取第一个 timestamp
+                if (lastModifiedReturn == null && extractInlineAnnotationValueFromJavadoc(fields[idx].javadoc, 'timestamp') != null) {
+                    lastModifiedReturn = fields[idx];
+                }
+                if (extractInlineAnnotationValueFromJavadoc(fields[idx].javadoc, 'timestamp-key') != null) {
+                    lastModifiedArgs.push(fields[idx]);
+                }
+            }
+            if (lastModifiedReturn == null) {
+                debug("field with pg-timestamp not found! ignore pg-last-modified flag.");
+                lastModified = null;
+            }
+        }
+    }
+
+    if (lastModified != null) {
+        let comma = '';
+        let args = '';
+        let callArgs = '';
+        let method = 'findTop' + lastModifiedReturn.fieldInJavaBeanMethod + 'By';
+        for (idx in lastModifiedArgs) {
+            args = args + comma + lastModifiedArgs[idx].fieldType + ' ' + lastModifiedArgs[idx].fieldName;
+            callArgs = callArgs + comma + lastModifiedArgs[idx].fieldName;
+            method = method + lastModifiedArgs[idx].fieldInJavaBeanMethod;
+            comma = ', '
+        }
+        method = method + 'OrderBy' + lastModifiedReturn.fieldInJavaBeanMethod + 'Desc';
+    _%>
+    <%= lastModifiedReturn.fieldType %> <%= method %>(<%= args %>);
+    <%_ } _%>
+
+    <% if (searchEngine === 'elasticsearch') { %>
     /**
      * Search for the <%= entityInstance %> corresponding to the query.
      *

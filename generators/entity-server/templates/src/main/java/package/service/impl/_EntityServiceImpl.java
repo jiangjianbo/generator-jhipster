@@ -127,6 +127,61 @@ public class <%= serviceClassName %><% if (service === 'serviceImpl') { %> imple
     public void delete(<%= pkType %> id) {
         log.debug("Request to delete <%= entityClass %> : {}", id);<%- include('../../common/delete_template', {viaService: viaService}); -%>
     }
+
+    <%_
+    let lastModified = null;
+    let lastModifiedReturn = null;
+    let lastModifiedArgs = [];
+
+    if (typeof javadoc != 'undefined') {
+        lastModified = extractInlineAnnotationValueFromJavadoc(javadoc, 'last-modified', null, '');
+        if (lastModified != null){
+            for (idx in fields) {
+                let required = false;
+
+                // ????? timestamp
+                if (lastModifiedReturn == null && extractInlineAnnotationValueFromJavadoc(fields[idx].javadoc, 'timestamp') != null) {
+                    lastModifiedReturn = fields[idx];
+                }
+                if (extractInlineAnnotationValueFromJavadoc(fields[idx].javadoc, 'timestamp-key') != null) {
+                    lastModifiedArgs.push(fields[idx]);
+                }
+            }
+            if (lastModifiedReturn == null) {
+                debug("field with pg-timestamp not found! ignore pg-last-modified flag.");
+                lastModified = null;
+            }
+        }
+    }
+
+    if (lastModified != null) {
+        let comma = '';
+        let args = '';
+        let callArgs = '';
+        let method = 'findTop' + lastModifiedReturn.fieldInJavaBeanMethod + 'By';
+        for (idx in lastModifiedArgs) {
+            args = args + comma + lastModifiedArgs[idx].fieldType + ' ' + lastModifiedArgs[idx].fieldName;
+            callArgs = callArgs + comma + lastModifiedArgs[idx].fieldName;
+            method = method + lastModifiedArgs[idx].fieldInJavaBeanMethod;
+            comma = ', '
+        }
+        method = method + 'OrderBy' + lastModifiedReturn.fieldInJavaBeanMethod + 'Desc';
+        let repoOrService = entityInstance + (viaService? 'Service': 'Repository');
+    _%>
+    <%_ if (service === 'serviceImpl') { _%>
+    @Override
+    <%_ } _%>
+    <%_ if (databaseType === 'sql') { _%>
+    @Transactional(readOnly = true)
+    <%_ } _%>
+    public <%= lastModifiedReturn.fieldType %> <%= method %>(<%= args %>) {
+        log.debug("Request to find timestamp");
+        return <%= repoOrService %>.<%= method %>(<%= callArgs %>);
+    }
+    <%_ } _%>
+
+
+
     <%_ if (searchEngine === 'elasticsearch') { _%>
 
     /**

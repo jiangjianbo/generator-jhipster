@@ -387,6 +387,33 @@ module.exports = class extends Generator {
     }
 
     /**
+     * 从 javadoc 中获取 pg- 开头内容的值，支持重复标签
+     *
+     * @param {*} javadoc
+     * @param {*} pattern
+     * @param {*} missingValue 标记不存在时候的返回值
+     * @param {*} itemEmptyValue 针对每个标记，匹配但是取值为空的时候的返回值
+     * @returns 二维数组，pattern匹配的值字符串，如果有匹配且没有value，该项包含''字符串
+     */
+    extractInlineAnnotationAllValuesFromJavadoc(javadoc, pattern, missingValue, itemEmptyValue) {
+        if (pattern == '@') return missingValue;
+
+        const lines = this.extractInlineAnnotationLinesFromJavadoc(javadoc, pattern);
+        const ret = [];
+        if (lines.length > 0) {
+            const pos = lines[0].indexOf(':');
+            if (pos >= 1) {
+                ret.push(lines[0].substring(pos + 1).trim());
+            } else {
+                ret.push(typeof emptyValue === 'undefined' ? '' : itemEmptyValue);
+            }
+        }
+
+        return ret;
+    }
+
+
+    /**
      * 移除 javadoc 中的内置 pg- 开头的内容
      *
      * @param {*} text
