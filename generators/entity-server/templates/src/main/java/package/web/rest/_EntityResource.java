@@ -76,34 +76,10 @@ import static org.elasticsearch.index.query.QueryBuilders.*;<% } %>
     let ignoreApi = null;
     let batch = [];
 
-    let lastModified = null;
-    let lastModifiedReturn = null;
-    let lastModifiedArgs = [];
-
     if (typeof javadoc != 'undefined') {
         mapping = extractInlineAnnotationValueFromJavadoc(javadoc, 'request-mapping', '/api', '/api');
         ignoreApi = extractInlineAnnotationValueFromJavadoc(javadoc, 'api-ignore', '', '').split(/\s*,\s*/);
         batch = extractInlineAnnotationValueFromJavadoc(javadoc, 'api-batch', '', '').split(/\s*,\s*/);
-
-        lastModified = extractInlineAnnotationValueFromJavadoc(javadoc, 'last-modified', null, '');
-        if (lastModified != null){
-            for (idx in fields) {
-                let required = false;
-
-                // 只取第一个 timestamp
-                if (lastModifiedReturn == null && extractInlineAnnotationValueFromJavadoc(fields[idx].javadoc, 'timestamp') != null) {
-                    lastModifiedReturn = fields[idx];
-                }
-                if (lastModified !== "serial" && extractInlineAnnotationValueFromJavadoc(fields[idx].javadoc, 'timestamp-key') != null) {
-                    lastModifiedArgs.push(fields[idx]);
-                }
-            }
-            if (lastModifiedReturn == null) {
-                debug("field with pg-timestamp not found! ignore pg-last-modified flag.");
-                lastModified = null;
-            }
-        }
-
     }
 _%>
 @RequestMapping("<%= mapping %>")
@@ -272,23 +248,44 @@ public class <%= entityClass %>Resource {
         return ResponseEntity.ok().headers(HeaderUtil.createEntityDeletionAlert(ENTITY_NAME, id<% if (pkType !== 'String') { %>.toString()<% } %>)).build();
     }
 
-    <%_ if (lastModified != null) {
+    <%_
+
+    let findInfos = loadCustomizedFindAndLastmodifiedFunctionsFromAnnotations(javadoc, fields);
+    // 'find-group-name1' : {
+    //     'find-return-fields': [null], 'find-return': ['distinct'],
+    //     'find-orderby-fields': [null, null, null], 'find-orderby': ['asc', 'desc', 'asc'],
+    //     'find-key-fields': [], 'find-key': [], 'find-key-op': []
+    // }
+    findInfos.__all_find.forEach( (name) => {
+        const group = findInfos[name];
+        const keys = group['find-key-fields'];
+
         let comma = '';
         let mcomma = '';
         let args = '';
         let callArgs = '';
         let brackets = '';
-        let method = 'findTop' + lastModifiedReturn.fieldInJavaBeanMethod + 'By';
-        for (idx in lastModifiedArgs) {
-            args = args + comma + lastModifiedArgs[idx].fieldType + ' ' + lastModifiedArgs[idx].fieldName;
-            callArgs = callArgs + comma + lastModifiedArgs[idx].fieldName;
-            method = method + mcomma + lastModifiedArgs[idx].fieldInJavaBeanMethod;
+        let returnField = group['find-return-fields'][0];
+        let method = 'find' + group['find-return'][0] + returnField.fieldInJavaBeanMethod + 'By';
+        for (idx in keys) {
+            args = args + comma + keys[idx].fieldType + ' ' + keys[idx].fieldName;
+            callArgs = callArgs + comma + keys[idx].fieldName;
+            method = method + mcomma + keys[idx].fieldInJavaBeanMethod + group['find-key-op'][idx];
             brackets = brackets + comma + '{}';
             comma = ', ';
-            mcomma = 'And';
+            mcomma = group['find-key'][idx];
         }
-        method = method + 'OrderBy' + lastModifiedReturn.fieldInJavaBeanMethod + 'Desc';
+
+        const orders = group['find-orderby-fields'];
+        if (orders.length > 0) {
+            method = method + 'OrderBy';
+            for (oidx in orders) {
+                method = method + group['find-orderby-fields'][oidx].fieldInJavaBeanMethod + group['find-orderby'][oidx];
+            }
+        }
+
         let repoOrService = entityInstance + (viaService? 'Service': 'Repository');
+        if (name === '__lastModified') {
     _%>
     /**
      * 获取对象的最后修改时间
@@ -298,12 +295,15 @@ public class <%= entityClass %>Resource {
     <%_ } _%>
     @GetMapping("/<%= entityApiUrl %>/last-modified")
     @Timed
-    public ResponseEntity<<%= lastModifiedReturn.fieldType %>> getLastModified<%= entityClass %>(<%= args %>) {
+    public ResponseEntity<<%= returnField.fieldType %>> getLastModified<%= entityClass %>(<%= args %>) {
         log.debug("REST request to get last-modified <%= entityClass %> : <%= brackets %>"<%= brackets.length == 0? '': ',' %> <%= callArgs %>);
-        <%= lastModifiedReturn.fieldType %> ret = <%= repoOrService %>.<%= method %>(<%= callArgs %>);
+        <%= returnField.fieldType %> ret = <%= repoOrService %>.<%= method %>(<%= callArgs %>);
         return ResponseUtil.wrapOrNotFound(Optional.ofNullable(ret));
     }
-    <%_ } _%>
+    <%_
+        }
+    });
+    _%>
 
     <% if (searchEngine === 'elasticsearch') { %>
     /**

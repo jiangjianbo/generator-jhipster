@@ -77,48 +77,41 @@ public interface <%= entityClass %>Service {
     void delete(<%= pkType %> id);
 
     <%_
-    let lastModified = null;
-    let lastModifiedReturn = null;
-    let lastModifiedArgs = [];
 
-    if (typeof javadoc != 'undefined') {
-        lastModified = extractInlineAnnotationValueFromJavadoc(javadoc, 'last-modified', null, '');
-        if (lastModified != null){
-            for (idx in fields) {
-                let required = false;
+    let findInfos = loadCustomizedFindAndLastmodifiedFunctionsFromAnnotations(javadoc, fields);
+    // 'find-group-name1' : {
+    //     'find-return-fields': [null], 'find-return': ['distinct'],
+    //     'find-orderby-fields': [null, null, null], 'find-orderby': ['asc', 'desc', 'asc'],
+    //     'find-key-fields': [], 'find-key': [], 'find-key-op': []
+    // }
+    findInfos.__all_find.forEach( (name) => {
+        const group = findInfos[name];
+        const keys = group['find-key-fields'];
 
-                // 只取第一个 timestamp
-                if (lastModifiedReturn == null && extractInlineAnnotationValueFromJavadoc(fields[idx].javadoc, 'timestamp') != null) {
-                    lastModifiedReturn = fields[idx];
-                }
-                if (lastModified !== "serial" && extractInlineAnnotationValueFromJavadoc(fields[idx].javadoc, 'timestamp-key') != null) {
-                    lastModifiedArgs.push(fields[idx]);
-                }
-            }
-            if (lastModifiedReturn == null) {
-                debug("field with pg-timestamp not found! ignore pg-last-modified flag.");
-                lastModified = null;
-            }
-        }
-    }
-
-    if (lastModified != null) {
         let comma = '';
         let mcomma = '';
         let args = '';
         let callArgs = '';
-        let method = 'findTop' + lastModifiedReturn.fieldInJavaBeanMethod + 'By';
-        for (idx in lastModifiedArgs) {
-            args = args + comma + lastModifiedArgs[idx].fieldType + ' ' + lastModifiedArgs[idx].fieldName;
-            callArgs = callArgs + comma + lastModifiedArgs[idx].fieldName;
-            method = method + mcomma + lastModifiedArgs[idx].fieldInJavaBeanMethod;
+        let returnField = group['find-return-fields'][0];
+        let method = 'find' + group['find-return'][0] + returnField.fieldInJavaBeanMethod + 'By';
+        for (idx in keys) {
+            args = args + comma + keys[idx].fieldType + ' ' + keys[idx].fieldName;
+            callArgs = callArgs + comma + keys[idx].fieldName;
+            method = method + mcomma + keys[idx].fieldInJavaBeanMethod + group['find-key-op'][idx];
             comma = ', ';
-            mcomma = 'And';
+            mcomma = group['find-key'][idx];
         }
-        method = method + 'OrderBy' + lastModifiedReturn.fieldInJavaBeanMethod + 'Desc';
+
+        const orders = group['find-orderby-fields'];
+        if (orders.length > 0) {
+            method = method + 'OrderBy';
+            for (oidx in orders) {
+                method = method + group['find-orderby-fields'][oidx].fieldInJavaBeanMethod + group['find-orderby'][oidx];
+            }
+        }
     _%>
-    <%= lastModifiedReturn.fieldType %> <%= method %>(<%= args %>);
-    <%_ } _%>
+    <%= returnField.fieldType %> <%= method %>(<%= args %>);
+    <%_ }); _%>
 
     <% if (searchEngine === 'elasticsearch') { %>
     /**

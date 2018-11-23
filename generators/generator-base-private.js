@@ -324,20 +324,27 @@ module.exports = class extends Generator {
     }
 
     /**
-     * 从 javadoc 中提取 pg- 开头的行内容
+     * 从 javadoc 中提取 pg- 开头的所有匹配行的内容，需要调用者进一步解析。
+     *
+     * 其中 pattern 的取值包括：
+     *  - 字符'@'，表示取 Annotation
+     *  - Map[string,Func] 对象，key是 pg-后的名字
+     *  - string 表示是 pg-后的名字
+     *  - \@ 字符，表示获取 Annotation
+     *  - 正则表达式，匹配时已经去除 pg- 前缀。
      *
      * @param {*} text javadoc字符串
-     * @param {*} pattern 可选，Map[string,Func] 对象，key是 pg-后的名字;或string是 pg-后的名字;或\@ 字符;或正则表达式。匹配时已经去除 pg- 前缀。
-     * @returns 数组，元素只包含 annotation 的 pg- 之后的文字
+     * @param {(at)|Map|String|Regex} pattern 可选。
+     * @returns 文本行数组，元素只包含 annotation 的 pg- 之后的文字
      */
     extractInlineAnnotationLinesFromJavadoc(text, pattern) {
         const frags = [];
-        const nameMatch = typeof pattern === 'string' ? pattern: null;
+        const nameMatch = typeof pattern === 'string' ? pattern : null;
         const isAnno = pattern === '@';
         const isRegex = typeof pattern === 'object' && typeof pattern.compile === 'function';
 
         text.replace(
-            /^\s*((\/\*)?\*+)?(\s*pg\-(.+)\s*)(\*\/)?$/gm,
+            /^\s*((\/\*)?\*+)?(\s*pg-(.+)\s*)(\*\/)?$/gm,
             (str, m1, m2, m3, m4, m5) => {
                 if (isAnno && m4.charAt(0) == '@') {
                     frags.push(m4);
@@ -387,6 +394,18 @@ module.exports = class extends Generator {
     }
 
     /**
+     * 从 javadoc 中提取 pattern 的单行内容，并且用逗号将值分解成数组
+     *
+     * @param {*} javadoc
+     * @param {*} pattern
+     * @returns 字符串数组
+     */
+    extractInlineAnnotationMultiValueFromJavadoc(javadoc, pattern) {
+        const text = this.extractInlineAnnotationValueFromJavadoc(javadoc, pattern, '', '').trim();
+        return text.length === 0 ? [] : text.split(/\s*,\s*/);
+    }
+
+    /**
      * 从 javadoc 中获取 pg- 开头内容的值，支持重复标签
      *
      * @param {*} javadoc
@@ -398,16 +417,15 @@ module.exports = class extends Generator {
     extractInlineAnnotationAllValuesFromJavadoc(javadoc, pattern, missingValue, itemEmptyValue) {
         if (pattern == '@') return missingValue;
 
-        const lines = this.extractInlineAnnotationLinesFromJavadoc(javadoc, pattern);
         const ret = [];
-        if (lines.length > 0) {
-            const pos = lines[0].indexOf(':');
+        this.extractInlineAnnotationLinesFromJavadoc(javadoc, pattern).forEach((line) => {
+            const pos = line.indexOf(':');
             if (pos >= 1) {
-                ret.push(lines[0].substring(pos + 1).trim());
+                ret.push(line.substring(pos + 1).trim());
             } else {
                 ret.push(typeof emptyValue === 'undefined' ? '' : itemEmptyValue);
             }
-        }
+        });
 
         return ret;
     }
@@ -424,19 +442,125 @@ module.exports = class extends Generator {
         if (defaultText == null) defaultText = '';
 
         const str = text.replace(
-            /^\s*((\/\*)?\*+)?(\s*pg\-.+\s*)(\*\/)?$/gm,
+            /^\s*((\/\*)?\*+)?(\s*pg-.+\s*)(\*\/)?$/gm,
             (str, m1, m2, m3, m4) => {
-                if (m1 == '/**') {
-                    return m4 == '*/' ? '' : m1;
-                } else {
-                    return m4 == '*/' ? m4 : '';
+                if (m1 == ('/' + '**')) {
+                    return m4 == ('*' + '/') ? '' : m1;
                 }
+                return m4 == ('*' + '/') ? m4 : '';
             }
         ).trim();
 
-        return str.length == 0 ? defaultText : str;
+        return str.length === 0 ? defaultText : str;
     }
 
+    /**
+     * 从 class 的 javadoc 和 字段列表中提取 pg-find 和 pg-last-modified 相关标记家族的信息
+     *
+     * @param {*} javadoc
+     * @param {*} fields
+     * @returns 返回对象，包含lastModified属性和find-group属性内容
+     */
+    loadCustomizedFindAndLastmodifiedFunctionsFromAnnotations(javadoc, fields) {
+        const returnObj = {
+            __all_find: [],
+            __find: [] // 'find-group-name1'
+            // '__lastModified': {...},
+            // 'find-group-name1' : {
+            //     'find-return-fields': [null], 'find-return': ['distinct'],
+            //     'find-orderby-fields': [null, null, null], 'find-orderby': ['asc', 'desc', 'asc'],
+            //     'find-key-fields': [], 'find-key': [], 'find-key-op': []
+            // }
+        };
+
+        let lastModified = null;
+        let findGroups = [];
+        if (typeof javadoc != 'undefined') {
+            lastModified = this.extractInlineAnnotationValueFromJavadoc(javadoc, 'last-modified', null, '');
+            findGroups = this.extractInlineAnnotationMultiValueFromJavadoc(javadoc, 'find');
+
+            this.debug(`pg-last-modified = ${lastModified} , length of pg-find = ${findGroups.length}, ${findGroups.length > 0 ? findGroups[0] : '0'}`);
+        }
+
+        if (lastModified != null || findGroups.length > 0) {
+            let lastModifiedReturn = null;
+            const lastModifiedArgs = [];
+
+            fields.forEach((field) => {
+                this.debug(`======== field ${field.fieldName}`);
+                const fielddoc = field.javadoc;
+
+                if (lastModifiedReturn == null && this.extractInlineAnnotationValueFromJavadoc(fielddoc, 'timestamp') != null) {
+                    lastModifiedReturn = field;
+                }
+                if (lastModified !== 'serial' && this.extractInlineAnnotationValueFromJavadoc(fielddoc, 'timestamp-key') != null) {
+                    lastModifiedArgs.push(field);
+                }
+
+                ['find-return', 'find-orderby', 'find-key'].forEach((key, index) => {
+                    const values = this.extractInlineAnnotationMultiValueFromJavadoc(fielddoc, key);
+                    if (values.length === 0) return;
+
+                    const groupName = values[0];
+                    const groupItem = returnObj[groupName] || {};
+                    returnObj[groupName] = groupItem;
+
+                    const keyField = key + '-fields';
+
+                    groupItem[keyField] = groupItem[keyField] || [];
+                    groupItem[keyField].push(field);
+
+                    groupItem[key] = groupItem[key] || [];
+                    groupItem[key].push(values.length > 1 ? this.textToCamel(values[1]) : '');
+                    if (index === 2) {
+                        groupItem['find-key-op'] = groupItem['find-key-op'] || [];
+                        groupItem['find-key-op'].push(values.length > 2 ? this.textToCamel(values[2]) : '');
+                    }
+                });
+            });
+
+            returnObj.__find = findGroups;
+            if (lastModifiedReturn == null) {
+                this.debug('field with pg-timestamp not found! ignore pg-last-modified flag.');
+                returnObj.__lastModified = null;
+            } else {
+                returnObj.__lastModified = {
+                    'find-return-fields': [lastModifiedReturn],
+                    'find-return': ['Top'],
+                    'find-orderby-fields': [lastModifiedReturn],
+                    'find-orderby': ['Desc'],
+                    'find-key-fields': lastModifiedArgs,
+                    'find-key': this.repeatArray('And', lastModifiedArgs.length),
+                    'find-key-op': this.repeatArray('', lastModifiedArgs.length)
+                };
+                returnObj.__all_find.push('__lastModified');
+            }
+            returnObj.__all_find.push(...findGroups);
+        }
+        this.debug(JSON.stringify(returnObj));
+        this.debug('process OK!');
+        return returnObj;
+    }
+
+    /**
+     * 创建并填充一个包含 text 多次的数组
+     *
+     * @param {*} text 数组每一项的内容
+     * @param {*} count 数组的长度
+     * @returns
+     */
+    repeatArray(text, count) {
+        const arr = [];
+        for (let i = 0; i < count; ++i) arr.push(text);
+        return arr;
+    }
+
+    textToCamel(text) {
+        return text.trim().toLowerCase().replace(
+            /((^\w)|(\s+\w))/g,
+            (match) => { return match.trim().toUpperCase(); }
+        );
+    }
 
     /**
      * Format As Class Javadoc
