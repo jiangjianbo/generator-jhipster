@@ -90,6 +90,7 @@ public interface <%=entityClass%>Repository extends <% if (databaseType === 'sql
     let lastModified = null;
     let lastModifiedReturn = null;
     let lastModifiedArgs = [];
+    let jpaMethods = [];
 
     if (typeof javadoc != 'undefined') {
         lastModified = extractInlineAnnotationValueFromJavadoc(javadoc, 'last-modified', null, '');
@@ -97,11 +98,11 @@ public interface <%=entityClass%>Repository extends <% if (databaseType === 'sql
             for (idx in fields) {
                 let required = false;
 
-                // ????? timestamp
+                // ???? timestamp
                 if (lastModifiedReturn == null && extractInlineAnnotationValueFromJavadoc(fields[idx].javadoc, 'timestamp') != null) {
                     lastModifiedReturn = fields[idx];
                 }
-                if (extractInlineAnnotationValueFromJavadoc(fields[idx].javadoc, 'timestamp-key') != null) {
+                if (lastModified !== "serial" && extractInlineAnnotationValueFromJavadoc(fields[idx].javadoc, 'timestamp-key') != null) {
                     lastModifiedArgs.push(fields[idx]);
                 }
             }
@@ -110,18 +111,30 @@ public interface <%=entityClass%>Repository extends <% if (databaseType === 'sql
                 lastModified = null;
             }
         }
+
+        extractInlineAnnotationAllValuesFromJavadoc(javadoc, 'jpa-method', [], '').forEach((line)=>{
+            const parts = line.split(/\s*,\s*/);
+            if (parts.length <= 1) return;
+
+            const obj = {};
+            const name = parts[0];
+
+        });
+
     }
 
     if (lastModified != null) {
         let comma = '';
+        let mcomma = '';
         let args = '';
         let callArgs = '';
         let method = 'findTop' + lastModifiedReturn.fieldInJavaBeanMethod + 'By';
         for (idx in lastModifiedArgs) {
             args = args + comma + lastModifiedArgs[idx].fieldType + ' ' + lastModifiedArgs[idx].fieldName;
             callArgs = callArgs + comma + lastModifiedArgs[idx].fieldName;
-            method = method + lastModifiedArgs[idx].fieldInJavaBeanMethod;
-            comma = ', '
+            method = method + mcomma + lastModifiedArgs[idx].fieldInJavaBeanMethod;
+            comma = ', ';
+            mcomma = 'And';
         }
         method = method + 'OrderBy' + lastModifiedReturn.fieldInJavaBeanMethod + 'Desc';
     _%>

@@ -94,7 +94,7 @@ import static org.elasticsearch.index.query.QueryBuilders.*;<% } %>
                 if (lastModifiedReturn == null && extractInlineAnnotationValueFromJavadoc(fields[idx].javadoc, 'timestamp') != null) {
                     lastModifiedReturn = fields[idx];
                 }
-                if (extractInlineAnnotationValueFromJavadoc(fields[idx].javadoc, 'timestamp-key') != null) {
+                if (lastModified !== "serial" && extractInlineAnnotationValueFromJavadoc(fields[idx].javadoc, 'timestamp-key') != null) {
                     lastModifiedArgs.push(fields[idx]);
                 }
             }
@@ -151,14 +151,14 @@ public class <%= entityClass %>Resource {
     /**
      * POST  /<%= entityApiUrl %>-batch : 批量插入 <%= entityInstance %>.
      *
-     * @param List<<%= instanceName %>> the <%= instanceName %> list to create
+     * @param <%= instanceName %>List the <%= instanceName %> list to create
      * @return the ResponseEntity with status 201 (Created) and with body the new ID, or with status 400 (Bad Request) if the <%= entityInstance %> has already an ID
      * @throws URISyntaxException if the Location URI syntax is incorrect
      */
     <%_ if (ignoreApi != null && ignoreApi.indexOf('batch-create') != -1) { _%>
     @ApiIgnore
     <%_ } _%>
-    @PostMapping("/batch/<%= entityApiUrl %>")
+    @PostMapping("/<%= entityApiUrl %>/batch")
     @Timed
     public ResponseEntity<List<<%= pkType %>>> create<%= entityClass %>Batch(<% if (validation) { %>@Valid <% } %>@RequestBody List<<%= instanceType %>> <%= instanceName %>List) throws URISyntaxException {
         log.debug("REST request to batch save <%= entityClass %> : {}", <%= instanceName %>List);
@@ -204,7 +204,7 @@ public class <%= entityClass %>Resource {
     /**
      * PUT  /<%= entityApiUrl %>-batch : Batch updates an existing <%= entityInstance %>.
      *
-     * @param List<<%= instanceName %>> the <%= instanceName %>List to update
+     * @param <%= instanceName %>List the <%= instanceName %>List to update
      * @return the ResponseEntity with status 200 (OK) and with body the updated <%= instanceName %>,
      * or with status 400 (Bad Request) if the <%= instanceName %> is not valid,
      * or with status 500 (Internal Server Error) if the <%= instanceName %> couldn't be updated
@@ -213,7 +213,7 @@ public class <%= entityClass %>Resource {
     <%_ if (ignoreApi != null && ignoreApi.indexOf('batch-update') != -1) { _%>
     @ApiIgnore
     <%_ } _%>
-    @PutMapping("/batch/<%= entityApiUrl %>")
+    @PutMapping("/<%= entityApiUrl %>/batch")
     @Timed
     public ResponseEntity<List<<%= pkType %>>> update<%= entityClass %>Batch(<% if (validation) { %>@Valid <% } %>@RequestBody List<<%= instanceType %>> <%= instanceName %>List) throws URISyntaxException {
         log.debug("REST request to update <%= entityClass %> : {}", <%= instanceName %>List);
@@ -274,6 +274,7 @@ public class <%= entityClass %>Resource {
 
     <%_ if (lastModified != null) {
         let comma = '';
+        let mcomma = '';
         let args = '';
         let callArgs = '';
         let brackets = '';
@@ -281,9 +282,10 @@ public class <%= entityClass %>Resource {
         for (idx in lastModifiedArgs) {
             args = args + comma + lastModifiedArgs[idx].fieldType + ' ' + lastModifiedArgs[idx].fieldName;
             callArgs = callArgs + comma + lastModifiedArgs[idx].fieldName;
-            method = method + lastModifiedArgs[idx].fieldInJavaBeanMethod;
+            method = method + mcomma + lastModifiedArgs[idx].fieldInJavaBeanMethod;
             brackets = brackets + comma + '{}';
-            comma = ', '
+            comma = ', ';
+            mcomma = 'And';
         }
         method = method + 'OrderBy' + lastModifiedReturn.fieldInJavaBeanMethod + 'Desc';
         let repoOrService = entityInstance + (viaService? 'Service': 'Repository');
@@ -294,7 +296,7 @@ public class <%= entityClass %>Resource {
     <%_ if (ignoreApi != null && ignoreApi.indexOf('last-modified') != -1) { _%>
     @ApiIgnore
     <%_ } _%>
-    @GetMapping("/last-modified/<%= entityApiUrl %>")
+    @GetMapping("/<%= entityApiUrl %>/last-modified")
     @Timed
     public ResponseEntity<<%= lastModifiedReturn.fieldType %>> getLastModified<%= entityClass %>(<%= args %>) {
         log.debug("REST request to get last-modified <%= entityClass %> : <%= brackets %>"<%= brackets.length == 0? '': ',' %> <%= callArgs %>);
